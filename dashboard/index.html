@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sentinel Demo Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; color: #e6edf3; min-height: 100vh; }
+
+    header { display: flex; align-items: center; gap: 16px; padding: 20px 32px; border-bottom: 1px solid #21262d; }
+    header h1 { font-size: 1.1rem; font-weight: 600; color: #58a6ff; letter-spacing: 0.05em; }
+    .badge { padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+    .badge-green  { background: #1a4731; color: #3fb950; border: 1px solid #238636; }
+    .badge-yellow { background: #3d2a00; color: #e3b341; border: 1px solid #9e6a03; }
+    .badge-red    { background: #4d1919; color: #f85149; border: 1px solid #da3633; }
+
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 24px 32px; }
+    .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 20px; }
+    .card .label { font-size: 0.72rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+    .card .value { font-size: 1.9rem; font-weight: 700; }
+    .card .sub   { font-size: 0.78rem; color: #8b949e; margin-top: 4px; }
+    .ok    { color: #3fb950; }
+    .warn  { color: #e3b341; }
+    .crit  { color: #f85149; }
+
+    .section { padding: 0 32px 24px; }
+    .section h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; color: #8b949e; margin-bottom: 12px; }
+
+    .pool-bar { background: #21262d; border-radius: 4px; height: 18px; overflow: hidden; margin-bottom: 4px; }
+    .pool-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+    .pool-label { font-size: 0.78rem; color: #8b949e; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { color: #8b949e; font-weight: 500; text-align: left; padding: 8px 12px; border-bottom: 1px solid #21262d; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    td { padding: 10px 12px; border-bottom: 1px solid #161b22; }
+    tr:hover td { background: #161b22; }
+
+    .incident-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 20px; margin-bottom: 12px; }
+    .incident-card .inc-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .incident-card .inc-id { color: #58a6ff; font-weight: 700; }
+    .incident-card .status-pill { padding: 2px 10px; border-radius: 12px; font-size: 0.72rem; font-weight: 600; }
+    .status-DETECTED            { background: #3d2a00; color: #e3b341; }
+    .status-INVESTIGATING       { background: #1c2d4a; color: #58a6ff; }
+    .status-ROOT_CAUSE_IDENTIFIED { background: #1c2d4a; color: #79c0ff; }
+    .status-REMEDIATION_CREATED { background: #1a3d4a; color: #56d364; }
+    .status-PATCH_VALIDATED     { background: #1a4731; color: #3fb950; }
+    .status-DEPLOYED            { background: #1a4731; color: #3fb950; }
+    .status-VERIFICATION_PASSED { background: #0a3622; color: #26a641; }
+    .status-RESOLVED            { background: #0a3622; color: #26a641; }
+    .status-FAILED              { background: #4d1919; color: #f85149; }
+
+    .timeline { display: flex; gap: 0; margin: 12px 0 0; overflow-x: auto; }
+    .timeline-step { display: flex; align-items: center; gap: 0; }
+    .timeline-step .step-label { font-size: 0.65rem; color: #8b949e; padding: 4px 8px; border: 1px solid #21262d; border-radius: 3px; white-space: nowrap; }
+    .timeline-step .step-label.done  { color: #3fb950; border-color: #238636; background: #0a3622; }
+    .timeline-step .step-label.active { color: #e3b341; border-color: #9e6a03; background: #3d2a00; }
+    .timeline-step .arrow { color: #30363d; padding: 0 4px; font-size: 0.9rem; }
+
+    .rca-box { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 14px; margin-top: 10px; font-size: 0.82rem; line-height: 1.6; }
+    .rca-box .rca-label { color: #8b949e; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+    .causes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .cause { padding: 3px 10px; border-radius: 12px; font-size: 0.72rem; background: #161b22; border: 1px solid #21262d; }
+    .cause.top { border-color: #da3633; color: #f85149; background: #4d1919; }
+
+    .refresh-note { font-size: 0.72rem; color: #484f58; text-align: right; padding: 4px 32px 12px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ SENTINEL</h1>
+  <span class="badge badge-green" id="sentinel-status">OPERATIONAL</span>
+  <span style="color:#8b949e;font-size:0.8rem;margin-left:auto" id="last-update"></span>
+</header>
+
+<!-- KPI cards -->
+<div class="grid">
+  <div class="card">
+    <div class="label">API Status</div>
+    <div class="value ok" id="api-status">HEALTHY</div>
+    <div class="sub" id="api-version">v1.0.0</div>
+  </div>
+  <div class="card">
+    <div class="label">Error Rate</div>
+    <div class="value ok" id="error-rate">0%</div>
+    <div class="sub" id="error-abs">0 / 0 requests</div>
+  </div>
+  <div class="card">
+    <div class="label">P95 Latency</div>
+    <div class="value ok" id="p95">0ms</div>
+    <div class="sub" id="avg-lat">avg 0ms</div>
+  </div>
+  <div class="card">
+    <div class="label">Open Incidents</div>
+    <div class="value ok" id="open-incidents">0</div>
+    <div class="sub" id="total-incidents">0 total</div>
+  </div>
+</div>
+
+<!-- DB Pool bar -->
+<div class="section">
+  <h2>Database Connection Pool</h2>
+  <div class="pool-bar"><div class="pool-fill ok" id="pool-bar" style="width:0%;background:#3fb950;"></div></div>
+  <div class="pool-label" id="pool-label">0 / 10 connections used (0%)</div>
+</div>
+
+<!-- Request log -->
+<div class="section">
+  <h2>Recent Requests</h2>
+  <table>
+    <thead><tr><th>Time</th><th>Path</th><th>Status</th><th>Latency</th></tr></thead>
+    <tbody id="req-log"></tbody>
+  </table>
+</div>
+
+<!-- Incidents -->
+<div class="section">
+  <h2>Incidents</h2>
+  <div id="incidents-list"><div style="color:#484f58;font-size:0.82rem">No incidents yet</div></div>
+</div>
+
+<div class="refresh-note" id="refresh-note">Auto-refresh every 2s</div>
+
+<script>
+const ORDER_API  = 'http://localhost:9000';
+const SENTINEL   = 'http://localhost:8001';
+const PIPELINE_STAGES = [
+  'DETECTED','INVESTIGATING','ROOT_CAUSE_IDENTIFIED',
+  'REMEDIATION_CREATED','PATCH_VALIDATED','DEPLOYED',
+  'VERIFICATION_PASSED','RESOLVED'
+];
+const reqLog = [];
+
+function color(val, warnThreshold, critThreshold) {
+  if (val >= critThreshold) return 'crit';
+  if (val >= warnThreshold) return 'warn';
+  return 'ok';
+}
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function formatTime(ts) {
+  return new Date(ts * 1000).toLocaleTimeString();
+}
+
+async function refreshMetrics() {
+  try {
+    const data = await fetchJSON(`${ORDER_API}/metrics/raw`);
+    const m = data.metrics;
+    const p = data.pool;
+
+    // Status
+    const errRate = m.error_rate_pct || 0;
+    const p95     = m.latency_p95_ms || 0;
+    const poolUsed = p.used || 0;
+    const poolMax  = p.max  || 10;
+    const poolPct  = poolMax ? Math.round(poolUsed / poolMax * 100) : 0;
+
+    const statusEl = document.getElementById('api-status');
+    statusEl.textContent = errRate > 10 || poolPct >= 100 ? 'DEGRADED' : 'HEALTHY';
+    statusEl.className = 'value ' + (errRate > 10 || poolPct >= 100 ? 'crit' : 'ok');
+
+    document.getElementById('api-version').textContent = `v${data.version} · mode: ${data.failure_mode}`;
+
+    // Error rate
+    const errEl = document.getElementById('error-rate');
+    errEl.textContent = errRate.toFixed(1) + '%';
+    errEl.className   = 'value ' + color(errRate, 5, 20);
+    document.getElementById('error-abs').textContent = `${m.total_errors} / ${m.total_requests} requests`;
+
+    // P95
+    const p95El = document.getElementById('p95');
+    p95El.textContent = p95.toFixed(0) + 'ms';
+    p95El.className   = 'value ' + color(p95, 500, 2000);
+    document.getElementById('avg-lat').textContent = `avg ${(m.latency_avg_ms||0).toFixed(0)}ms`;
+
+    // Pool
+    const poolBar = document.getElementById('pool-bar');
+    poolBar.style.width = poolPct + '%';
+    const poolColor = poolPct >= 90 ? '#f85149' : poolPct >= 70 ? '#e3b341' : '#3fb950';
+    poolBar.style.background = poolColor;
+    document.getElementById('pool-label').textContent =
+      `${poolUsed} / ${poolMax} connections used (${poolPct}%)`;
+
+    // Fake a request row for the table (since we can't stream real logs here)
+    const now = Date.now() / 1000;
+    const statuses = ['200','200','200','200','200','500','503'];
+    const ids = ['123','124','125','126','127','128','129','130'];
+    const fake = {
+      time: now,
+      path: `/orders/${ids[Math.floor(Math.random()*ids.length)]}`,
+      status: errRate > 30 ? (Math.random() > 0.6 ? '200' : '503') : '200',
+      latency: p95 > 500 ? Math.floor(Math.random() * p95) : Math.floor(20 + Math.random() * 30),
+    };
+    reqLog.unshift(fake);
+    if (reqLog.length > 8) reqLog.pop();
+    const tbody = document.getElementById('req-log');
+    tbody.innerHTML = reqLog.map(r => {
+      const cls = r.status >= '500' ? 'crit' : r.status >= '400' ? 'warn' : 'ok';
+      return `<tr>
+        <td style="color:#8b949e">${new Date(r.time*1000).toLocaleTimeString()}</td>
+        <td>GET ${r.path}</td>
+        <td class="${cls}">${r.status}</td>
+        <td>${r.latency}ms</td>
+      </tr>`;
+    }).join('');
+
+  } catch (e) {
+    document.getElementById('api-status').textContent = 'UNREACHABLE';
+    document.getElementById('api-status').className = 'value crit';
+  }
+}
+
+async function refreshIncidents() {
+  try {
+    const sentData = await fetchJSON(`${SENTINEL}/api/v1/status`);
+    const openEl = document.getElementById('open-incidents');
+    openEl.textContent = sentData.open_incidents;
+    openEl.className = 'value ' + (sentData.open_incidents > 0 ? 'warn' : 'ok');
+    document.getElementById('total-incidents').textContent = `${sentData.total_incidents} total`;
+
+    const listData = await fetchJSON(`${SENTINEL}/api/v1/incidents`);
+    const incidents = listData.incidents.slice().reverse();
+    const container = document.getElementById('incidents-list');
+
+    if (incidents.length === 0) {
+      container.innerHTML = '<div style="color:#484f58;font-size:0.82rem">No incidents yet</div>';
+      return;
+    }
+
+    container.innerHTML = incidents.map(inc => {
+      const stageIndex = PIPELINE_STAGES.indexOf(inc.status);
+      const timeline = PIPELINE_STAGES.map((stage, i) => {
+        let cls = '';
+        if (i < stageIndex) cls = 'done';
+        else if (i === stageIndex) cls = 'active';
+        const arrow = i < PIPELINE_STAGES.length - 1 ? '<span class="arrow">→</span>' : '';
+        return `<div class="timeline-step">
+          <span class="step-label ${cls}">${stage.replace(/_/g,' ')}</span>
+          ${arrow}
+        </div>`;
+      }).join('');
+
+      const causesHtml = (inc.candidate_causes || []).map((c, i) => `
+        <span class="cause ${i===0?'top':''}">${c.cause} — ${c.confidence_pct}%</span>
+      `).join('');
+
+      const rcaHtml = inc.rca ? `
+        <div class="rca-box">
+          <div class="rca-label">Root cause (confidence ${Math.round((inc.rca_confidence||0)*100)}%)</div>
+          <div>${inc.rca}</div>
+          <div class="causes">${causesHtml}</div>
+        </div>` : '';
+
+      const prHtml = inc.fix_pr_url ? `
+        <div style="margin-top:8px;font-size:0.78rem;color:#58a6ff">
+          🔀 Branch: <code>${inc.fix_branch}</code> &nbsp;|&nbsp; PR #${inc.fix_pr_number}: <a href="${inc.fix_pr_url}" style="color:#58a6ff">${inc.fix_pr_url}</a>
+        </div>` : '';
+
+      return `<div class="incident-card">
+        <div class="inc-header">
+          <span class="inc-id">${inc.incident_id}</span>
+          <span class="badge badge-red">${inc.severity}</span>
+          <span class="status-pill status-${inc.status}">${inc.status.replace(/_/g,' ')}</span>
+          <span style="color:#8b949e;font-size:0.75rem;margin-left:auto">${formatTime(inc.created_at)}</span>
+        </div>
+        <div style="font-size:0.8rem;color:#8b949e;margin-bottom:6px">Service: <span style="color:#e6edf3">${inc.service}</span></div>
+        <div style="font-size:0.8rem">${(inc.symptoms||[]).map(s=>`<div>• ${s}</div>`).join('')}</div>
+        ${rcaHtml}
+        ${prHtml}
+        <div class="timeline" style="margin-top:12px">${timeline}</div>
+      </div>`;
+    }).join('');
+
+  } catch(e) {
+    document.getElementById('open-incidents').textContent = '?';
+    document.getElementById('sentinel-status').textContent = 'UNREACHABLE';
+    document.getElementById('sentinel-status').className = 'badge badge-red';
+  }
+}
+
+async function refresh() {
+  await Promise.all([refreshMetrics(), refreshIncidents()]);
+  document.getElementById('last-update').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
