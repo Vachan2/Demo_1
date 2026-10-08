@@ -11,7 +11,8 @@ _pool: asyncpg.Pool | None = None
 async def create_pool() -> asyncpg.Pool:
     global _pool
     _pool = await asyncpg.create_pool(
-        dsn=settings.database_url,
+        dsn=settings.database_url.split("?")[0],
+        ssl="require",
         min_size=settings.db_pool_min,
         max_size=settings.db_pool_max,
         command_timeout=5,

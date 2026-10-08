@@ -41,24 +41,116 @@ logger = logging.getLogger("order-api")
 # Background metric pusher (to Sentinel)
 # ---------------------------------------------------------------------------
 async def _push_metrics() -> None:
-    """Periodically POST metrics to Sentinel so it can detect anomalies."""
-    async with httpx.AsyncClient(timeout=2.0) as client:
+    """Report pool-exhaustion incidents to the deployed Sentinel."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        incident_reported = False
         while True:
             await asyncio.sleep(settings.metrics_push_interval)
             try:
+                metrics = snapshot()
+                pool = pool_stats()
+                failure_mode = settings.demo_failure_mode
+
+                pool_exhausted = (
+                    pool["max"] > 0
+                    and pool["free"] == 0
+                    and pool["used"] >= pool["max"]
+                )
+
+                should_report = pool_exhausted and (
+                    failure_mode == "connection_leak"
+                    or metrics["error_rate_pct"] > 0
+                )
+
+                if not should_report:
+                    incident_reported = False
+                    continue
+
+                if incident_reported:
+                    continue
+
+                from datetime import datetime, timezone
+
+                now = datetime.now(timezone.utc).isoformat()
+
+                correlation_id = (
+                    f"demo1-{settings.app_name}-{failure_mode}-pool-exhausted"
+                )
+
                 payload = {
-                    "service": settings.app_name,
-                    "version": settings.app_version,
-                    "metrics": snapshot(),
-                    "pool": pool_stats(),
-                    "failure_mode": settings.demo_failure_mode,
+                    "title": f"Order API database connection pool exhausted",
+                    "description": (
+                        f"Database pool exhaustion detected for {settings.app_name}. "
+                        f"Failure mode: {failure_mode}. "
+                        f"Pool: {pool}. Metrics: {metrics}"
+                    ),
+                    "severity": "high",
+                    "affected_services": [settings.app_name],
+                    "environment": "demo",
+                    "correlation_id": correlation_id,
+                    "symptoms": [
+                        "Database connection pool exhausted",
+                        f"Failure mode: {failure_mode}",
+                    ],
+                    "tags": ["demo1", "database", "connection-pool"],
+                    "signals": [
+                        {
+                            "signal_id": f"demo1-pool-{now}",
+                            "signal_type": "metric_threshold",
+                            "source": "other",
+                            "title": "Database connection pool exhausted",
+                            "description": (
+                                f"Pool utilisation reached {pool['used']}/"
+                                f"{pool['max']}; free connections: {pool['free']}."
+                            ),
+                            "severity": "high",
+                            "received_at": now,
+                            "service": settings.app_name,
+                            "environment": "demo",
+                            "raw_payload": {
+                                "pool": pool,
+                                "metrics": metrics,
+                                "failure_mode": failure_mode,
+                            },
+                            "labels": {
+                                "service": settings.app_name,
+                                "failure_mode": failure_mode,
+                            },
+                        }
+                    ],
+                    "metadata": {
+                        "source": "demo1",
+                        "failure_mode": failure_mode,
+                        "pool": pool,
+                        "metrics": metrics,
+                    },
                 }
-                await client.post(
-                    f"{settings.sentinel_url}/api/v1/metrics",
+
+                response = await client.post(
+                    f"{settings.sentinel_url.rstrip('/')}/api/v1/incidents",
                     json=payload,
                 )
+
+                response.raise_for_status()
+
+                result = response.json()
+
+                logger.warning(
+                    "sentinel_incident_reported",
+                    extra={
+                        "status_code": response.status_code,
+                        "incident_id": result.get("incident", {}).get("incident_id"),
+                        "is_duplicate": result.get("is_duplicate"),
+                    },
+                )
+
+                incident_reported = True
+
+            except asyncio.CancelledError:
+                raise
+
             except Exception:
-                pass  # Sentinel may not be running yet; don't crash the API
+                logger.exception("sentinel_incident_reporting_failed")
 
 
 # ---------------------------------------------------------------------------

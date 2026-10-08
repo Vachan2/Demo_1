@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinel-demo-pg
+    environment:
+      POSTGRES_USER: orders
+      POSTGRES_PASSWORD: orders
+      POSTGRES_DB: orders
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./demo/order-service/seed.sql:/docker-entrypoint-initdb.d/seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orders"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Order Service API
+  order-api:
+    build:
+      context: ./demo/order-service
+      dockerfile: Dockerfile
+    container_name: sentinel-demo-order-api
+    ports:
+      - "9000:9000"
+    environment:
+      DATABASE_URL: postgresql://orders:orders@postgres:5432/orders
+      SENTINEL_URL: http://sentinel:8001
+      DEMO_FAILURE_MODE: none
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 9000 --reload
+    volumes:
+      - ./demo/order-service:/app
+
+  # Sentinel Service
+  sentinel:
+    build:
+      context: ./sentinel
+      dockerfile: Dockerfile
+    container_name: sentinel-demo-sentinel
+    ports:
+      - "8001:8001"
+    environment:
+      ORDER_API_URL: http://order-api:9000
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      - order-api
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+    volumes:
+      - ./sentinel:/app
+      - ./demo/order-service:/workspace/order-service
+
+volumes:
+  postgres_data:

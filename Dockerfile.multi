@@ -1,0 +1,79 @@
+# Multi-stage build for both services (alternative to docker-compose)
+# Usage: docker build -f Dockerfile.multi -t sentinel-demo:latest .
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Build stage for order-service
+# ─────────────────────────────────────────────────────────────────────────────
+FROM python:3.12-slim as order-service-builder
+
+WORKDIR /build/order-service
+
+COPY demo/order-service/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY demo/order-service . 
+
+RUN pip install --no-cache-dir gunicorn
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Build stage for sentinel
+# ─────────────────────────────────────────────────────────────────────────────
+FROM python:3.12-slim as sentinel-builder
+
+WORKDIR /build/sentinel
+
+RUN apt-get update && apt-get install -y --no-cache git && rm -rf /var/lib/apt/lists/*
+
+COPY sentinel/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY sentinel .
+
+RUN pip install --no-cache-dir gunicorn
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Final stage - combined image with both services
+# ─────────────────────────────────────────────────────────────────────────────
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-cache git supervisor && rm -rf /var/lib/apt/lists/*
+
+# Copy order-service
+COPY --from=order-service-builder /build/order-service /srv/order-service
+COPY --from=order-service-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+
+# Copy sentinel
+COPY --from=sentinel-builder /build/sentinel /srv/sentinel
+COPY --from=sentinel-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+
+# Configure supervisor to run both services
+RUN mkdir -p /etc/supervisor/conf.d
+
+COPY <<EOF /etc/supervisor/conf.d/services.conf
+[supervisord]
+nodaemon=true
+logfile=/var/log/supervisord.log
+pidfile=/var/run/supervisord.pid
+
+[program:order-api]
+directory=/srv/order-service
+command=uvicorn main:app --host 0.0.0.0 --port 9000
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/order-api.log
+stderr_logfile=/var/log/order-api.err
+
+[program:sentinel]
+directory=/srv/sentinel
+command=uvicorn main:app --host 0.0.0.0 --port 8001
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/sentinel.log
+stderr_logfile=/var/log/sentinel.err
+EOF
+
+EXPOSE 9000 8001
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
