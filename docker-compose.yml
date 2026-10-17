@@ -30,33 +30,15 @@ services:
       - "9000:9000"
     environment:
       DATABASE_URL: postgresql://orders:orders@postgres:5432/orders
-      SENTINEL_URL: http://sentinel:8001
+      SENTINEL_URL: ${SENTINEL_URL:?Set SENTINEL_URL to the modern Sentinel API}
       DEMO_FAILURE_MODE: none
+      SENTINEL_INCIDENT_API_KEY: ${SENTINEL_INCIDENT_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
     command: uvicorn main:app --host 0.0.0.0 --port 9000 --reload
     volumes:
       - ./demo/order-service:/app
-
-  # Sentinel Service
-  sentinel:
-    build:
-      context: ./sentinel
-      dockerfile: Dockerfile
-    container_name: sentinel-demo-sentinel
-    ports:
-      - "8001:8001"
-    environment:
-      ORDER_API_URL: http://order-api:9000
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-    depends_on:
-      - order-api
-    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
-    volumes:
-      - ./sentinel:/app
-      - ./demo/order-service:/workspace/order-service
 
 volumes:
   postgres_data:

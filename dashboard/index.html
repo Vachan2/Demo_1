@@ -124,11 +124,9 @@
 
 <script>
 const ORDER_API  = 'http://localhost:9000';
-const SENTINEL   = 'http://localhost:8001';
+const SENTINEL   = 'http://localhost:8000';
 const PIPELINE_STAGES = [
-  'DETECTED','INVESTIGATING','ROOT_CAUSE_IDENTIFIED',
-  'REMEDIATION_CREATED','PATCH_VALIDATED','DEPLOYED',
-  'VERIFICATION_PASSED','RESOLVED'
+  'open','investigating','remediating','validating','escalated'
 ];
 const reqLog = [];
 
@@ -145,7 +143,7 @@ async function fetchJSON(url) {
 }
 
 function formatTime(ts) {
-  return new Date(ts * 1000).toLocaleTimeString();
+  return new Date(ts).toLocaleTimeString();
 }
 
 async function refreshMetrics() {
@@ -218,14 +216,14 @@ async function refreshMetrics() {
 
 async function refreshIncidents() {
   try {
-    const sentData = await fetchJSON(`${SENTINEL}/api/v1/status`);
+    const listData = await fetchJSON(`${SENTINEL}/api/v1/incidents?limit=50`);
+    const incidents = (listData.items || []).slice().reverse();
+    const openStatuses = new Set(['open', 'investigating', 'remediating', 'validating']);
     const openEl = document.getElementById('open-incidents');
-    openEl.textContent = sentData.open_incidents;
-    openEl.className = 'value ' + (sentData.open_incidents > 0 ? 'warn' : 'ok');
-    document.getElementById('total-incidents').textContent = `${sentData.total_incidents} total`;
-
-    const listData = await fetchJSON(`${SENTINEL}/api/v1/incidents`);
-    const incidents = listData.incidents.slice().reverse();
+    const openCount = incidents.filter(inc => openStatuses.has(inc.status)).length;
+    openEl.textContent = openCount;
+    openEl.className = 'value ' + (openCount > 0 ? 'warn' : 'ok');
+    document.getElementById('total-incidents').textContent = `${listData.total || incidents.length} total`;
     const container = document.getElementById('incidents-list');
 
     if (incidents.length === 0) {
@@ -246,33 +244,16 @@ async function refreshIncidents() {
         </div>`;
       }).join('');
 
-      const causesHtml = (inc.candidate_causes || []).map((c, i) => `
-        <span class="cause ${i===0?'top':''}">${c.cause} — ${c.confidence_pct}%</span>
-      `).join('');
-
-      const rcaHtml = inc.rca ? `
-        <div class="rca-box">
-          <div class="rca-label">Root cause (confidence ${Math.round((inc.rca_confidence||0)*100)}%)</div>
-          <div>${inc.rca}</div>
-          <div class="causes">${causesHtml}</div>
-        </div>` : '';
-
-      const prHtml = inc.fix_pr_url ? `
-        <div style="margin-top:8px;font-size:0.78rem;color:#58a6ff">
-          🔀 Branch: <code>${inc.fix_branch}</code> &nbsp;|&nbsp; PR #${inc.fix_pr_number}: <a href="${inc.fix_pr_url}" style="color:#58a6ff">${inc.fix_pr_url}</a>
-        </div>` : '';
-
       return `<div class="incident-card">
         <div class="inc-header">
           <span class="inc-id">${inc.incident_id}</span>
           <span class="badge badge-red">${inc.severity}</span>
           <span class="status-pill status-${inc.status}">${inc.status.replace(/_/g,' ')}</span>
-          <span style="color:#8b949e;font-size:0.75rem;margin-left:auto">${formatTime(inc.created_at)}</span>
+          <span style="color:#8b949e;font-size:0.75rem;margin-left:auto">${formatTime(inc.detected_at)}</span>
         </div>
-        <div style="font-size:0.8rem;color:#8b949e;margin-bottom:6px">Service: <span style="color:#e6edf3">${inc.service}</span></div>
+        <div style="font-size:0.8rem;color:#8b949e;margin-bottom:6px">Services: <span style="color:#e6edf3">${(inc.affected_services || []).join(', ')}</span></div>
         <div style="font-size:0.8rem">${(inc.symptoms||[]).map(s=>`<div>• ${s}</div>`).join('')}</div>
-        ${rcaHtml}
-        ${prHtml}
+        <div style="font-size:0.8rem;color:#8b949e;margin-top:8px">${inc.description || ''}</div>
         <div class="timeline" style="margin-top:12px">${timeline}</div>
       </div>`;
     }).join('');

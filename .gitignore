@@ -18,7 +18,6 @@ ENV/
 
 # Environment files (contain secrets)
 .env
-sentinel/.env
 
 # pytest / coverage
 .pytest_cache/
